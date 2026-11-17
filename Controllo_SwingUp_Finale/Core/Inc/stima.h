@@ -40,7 +40,7 @@ typedef struct
 } Stima;
 
 /* Guadagni di correzione in uso: all'avvio quelli di config_controllo.h,
- * poi quelli della rete scelta (reti_candidate.c, main.c). */
+ * poi quelli della rete scelta (reti_candidate.c, Rete_Init in rete.c). */
 extern float stima_l_theta, stima_l_omega, stima_l_b, stima_l_x;
 
 /* Prima lettura: pendolo considerato fermo. */
