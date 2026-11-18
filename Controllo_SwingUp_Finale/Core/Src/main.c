@@ -22,7 +22,9 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 /* Moduli dell'applicazione: encoder.c, stepper.c, rete.c, controllo.c, hil.c.
- * Qui restano solo l'inizializzazione delle periferiche e la sequenza di avvio. */
+ * Qui restano l'inizializzazione delle periferiche, la sequenza di avvio e il
+ * ciclo principale. */
+#include "stepper.h"
 #include "encoder.h"
 #include "rete.h"
 #include "controllo.h"
@@ -124,8 +126,37 @@ int main(void)
   Hil_Esegui();
 #endif
 
-  /* Calibrazione del pendolo, homing del carrello, abilitazione di B1. */
-  Controllo_Init();
+  /* Acquisire il riferimento del pendolo PRIMA di muovere il carrello. */
+  Stepper_Stop();
+  if (Inizializza_Theta() != HAL_OK)
+  {
+      controllo_errore = 7;
+      Error_Handler();
+  }
+  ultimo_theta_rad = theta_rad;
+  velocita_angolare_rad_s = 0.0f;
+
+  /* Homing automatico come prima, indipendente dal pulsante. */
+  Inizializza();
+  if (inizializzazione_esito != HAL_OK)
+  {
+      Error_Handler();
+  }
+  Calcola_LimitiControllo();
+
+  /* Da qui B1 abilita/disabilita solo il controllo nel ciclo principale.
+   * Le pressioni durante l'homing non vengono accodate.
+   */
+  Stepper_Stop();
+  __HAL_GPIO_EXTI_CLEAR_IT(B1_Pin);
+  HAL_NVIC_ClearPendingIRQ(EXTI15_10_IRQn);
+  /* Aggiornamento dal riferimento pre-homing, NON una nuova calibrazione. */
+  Leggi_theta();
+  ultimo_theta_rad = theta_rad;
+  ultimo_carrello_steps = posizione_carrello_steps;
+  ultimo_campione_ms = HAL_GetTick();
+  pulsante_inizializzato = 1;
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
   /* USER CODE END 2 */
 
@@ -133,7 +164,12 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-      Controllo_Ciclo();
+      if (!controllo_abilitato)
+      {
+          Rete_CambiaSeRichiesto();
+          Controllo_AccettaAvvio();
+      }
+      Controllo_Campiona();
       HAL_Delay(1);
     /* USER CODE END WHILE */
 

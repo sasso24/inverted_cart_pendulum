@@ -24,11 +24,18 @@ extern volatile int32_t limite_controllo_min_steps;
 extern volatile int32_t limite_controllo_max_steps;
 /* Comando della rete in Hz, scritto anche da hil.c. */
 extern volatile float frequenza_richiesta_hz;
+/* Stato del campionamento, inizializzato dal main dopo l'homing. */
+extern volatile float velocita_angolare_rad_s;
+extern uint32_t ultimo_campione_ms;
+extern int32_t ultimo_carrello_steps;
+extern float ultimo_theta_rad;
 
-/* Dal main, in quest'ordine: Controllo_Init() una volta, poi Controllo_Ciclo()
- * nel ciclo infinito. */
-void Controllo_Init(void);
-void Controllo_Ciclo(void);
+/* Dal main, dopo l'homing: limiti di corsa del controllo dalla corsa misurata. */
+void Calcola_LimitiControllo(void);
+/* Dal ciclo principale, a controllo fermo: avvio richiesto da B1. */
+void Controllo_AccettaAvvio(void);
+/* Dal ciclo principale: campionamento, stima e rete ogni CONTROL_PERIOD_MS. */
+void Controllo_Campiona(void);
 
 /* Da SysTick_Handler (stm32f4xx_it.c), in quest'ordine. */
 void Controllo_ButtonTick(void);

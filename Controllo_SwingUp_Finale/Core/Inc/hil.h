@@ -10,7 +10,7 @@
 #include "main.h"
 
 #ifndef HIL_MODE
-#define HIL_MODE 1
+#define HIL_MODE 0
 #endif
 
 #if HIL_MODE

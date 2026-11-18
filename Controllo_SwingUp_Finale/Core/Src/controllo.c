@@ -63,9 +63,9 @@ static volatile float frequenza_rampa_hz = 0.0f;
 static volatile uint32_t tick_fermo_inversione = 0;
 static volatile uint32_t ultimo_comando_ms = 0;
 static uint32_t ultimo_motore_ms = 0;
-static uint32_t ultimo_campione_ms = 0;
-static int32_t ultimo_carrello_steps = 0;
-static float ultimo_theta_rad = PI_F;
+uint32_t ultimo_campione_ms = 0;
+int32_t ultimo_carrello_steps = 0;
+float ultimo_theta_rad = PI_F;
 
 /* Stimatore dello stato (stima.c), lo stesso usato in addestramento.
  * Predizione in SysTick ogni 2 ms, correzione in Controllo_Campiona ogni CONTROL_PERIOD_MS.
@@ -114,7 +114,7 @@ void Controllo_Disabilita(void)
 
 /* Limiti del controllo: centro della corsa misurata +/- CFG_LIMITE_CORSA_M,
  * mai oltre i finecorsa. Python: x = (passi - corsa/2)*m_passo, stop a |x| >= limite. */
-static void Calcola_LimitiControllo(void)
+void Calcola_LimitiControllo(void)
 {
     float centro = 0.5f * (float)corsa_totale_steps;
     float mezzo = CFG_LIMITE_CORSA_M / METRI_PER_STEP;
@@ -168,7 +168,7 @@ static uint8_t Theta_ProntoPerAvvio(void)
 }
 
 /* Chiamare solo dal main, dopo l'uscita da ogni sequenza precedente. */
-static void Controllo_AccettaAvvio(void)
+void Controllo_AccettaAvvio(void)
 {
     uint32_t primask = __get_PRIMASK();
     __disable_irq();
@@ -339,7 +339,7 @@ void Controllo_StimaTick(void)
  * La posizione del carrello viene dagli STEP emessi (nessun encoder lineare);
  * le velocita' vengono dallo stimatore, non da differenze fra letture.
  */
-static void Controllo_Campiona(void)
+void Controllo_Campiona(void)
 {
     uint32_t now = HAL_GetTick();
     uint32_t elapsed = (uint32_t)(now - ultimo_campione_ms);
@@ -452,56 +452,6 @@ static void Controllo_Campiona(void)
         }
     }
     __set_PRIMASK(primask);
-}
-
-/* Dopo Encoder_Init() e Rete_Init(), solo dal main: calibrazione del pendolo,
- * homing del carrello, limiti del controllo, poi abilitazione di B1.
- * In caso di errore chiama Error_Handler() (non ritorna). */
-void Controllo_Init(void)
-{
-    /* Acquisire il riferimento del pendolo PRIMA di muovere il carrello. */
-    Stepper_Stop();
-    if (Inizializza_Theta() != HAL_OK)
-    {
-        controllo_errore = 7;
-        Error_Handler();
-    }
-    ultimo_theta_rad = theta_rad;
-    velocita_angolare_rad_s = 0.0f;
-
-    /* Homing automatico come prima, indipendente dal pulsante. */
-    Inizializza();
-    if (inizializzazione_esito != HAL_OK)
-    {
-        Error_Handler();
-    }
-    Calcola_LimitiControllo();
-
-    /* Da qui B1 abilita/disabilita solo il controllo nel ciclo principale.
-     * Le pressioni durante l'homing non vengono accodate.
-     */
-    Stepper_Stop();
-    __HAL_GPIO_EXTI_CLEAR_IT(B1_Pin);
-    HAL_NVIC_ClearPendingIRQ(EXTI15_10_IRQn);
-    /* Aggiornamento dal riferimento pre-homing, NON una nuova calibrazione. */
-    Leggi_theta();
-    ultimo_theta_rad = theta_rad;
-    ultimo_carrello_steps = posizione_carrello_steps;
-    ultimo_campione_ms = HAL_GetTick();
-    pulsante_inizializzato = 1;
-    HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
-}
-
-/* Una iterazione del ciclo principale: a controllo fermo cambio rete e
- * avvio richiesto da B1, poi campionamento, stima e rete. */
-void Controllo_Ciclo(void)
-{
-    if (!controllo_abilitato)
-    {
-        Rete_CambiaSeRichiesto();
-        Controllo_AccettaAvvio();
-    }
-    Controllo_Campiona();
 }
 
 /* Fronti di B1 (PC13): richiesta di avvio o arresto immediato. Unica
