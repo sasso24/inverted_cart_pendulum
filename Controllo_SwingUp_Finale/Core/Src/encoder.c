@@ -4,14 +4,13 @@
 
 extern TIM_HandleTypeDef htim2;
 
-// Var encoder
 #define ENCODER_CPR  CFG_ENCODER_CPR
 #define HALF_CPR     (CFG_ENCODER_CPR / 2)
 
 #define THETA_STABILE_MS    1000U
 #define THETA_TIMEOUT_MS   30000U
 
-// Metti -1 se vuoi invertire il verso positivo dell'angolo.
+/* Verso dell'encoder. */
 #define ENCODER_SIGN  -1
 
 static uint32_t conteggio_precedente = 0;
@@ -19,15 +18,15 @@ static int32_t posizione = HALF_CPR;
 
 volatile float theta_deg = 180.0f;
 volatile float theta_rad = PI_F;
-/* Le inizializzazioni statiche sopra non sono ancora un riferimento valido. */
+
 volatile uint8_t theta_inizializzato = 0;
 /* Encoder: variazione dell'ultima lettura e tempo di quiete (una lettura per periodo). */
 volatile int32_t encoder_ultimo_delta = 0;
 volatile uint32_t encoder_quiete_ms = 0;
-volatile uint32_t encoder_salti = 0;          /* salti scartati, per il debugger */
+volatile uint32_t encoder_salti = 0;          // salti scartati, per debug
 volatile uint32_t theta_ricalibrazioni = 0;
 
-/* Dopo MX_TIM2_Init(): contatore e riferimento della prima lettura a zero. */
+/* Inizializzazione dell'encoder. */
 HAL_StatusTypeDef Encoder_Init(void)
 {
     __HAL_TIM_SET_COUNTER(&htim2, 0U);
@@ -38,46 +37,37 @@ HAL_StatusTypeDef Encoder_Init(void)
 void Leggi_theta(void){
 	uint32_t conteggio = __HAL_TIM_GET_COUNTER(&htim2);
 
-	int64_t delta = (int64_t)conteggio
-				- (int64_t)conteggio_precedente;
-
-	conteggio_precedente = conteggio;
-
-	// Gestione del passaggio attraverso lo zero del timer a 32 bit.
-	if (delta > 2147483647LL)
-	  delta -= 4294967296LL;
-	else if (delta < -2147483648LL)
-	  delta += 4294967296LL;
-	encoder_ultimo_delta = (int32_t)delta;
+    int32_t delta = (int32_t)(conteggio - conteggio_precedente);
+    conteggio_precedente = conteggio;
+    encoder_ultimo_delta = delta;
 
 	// Aggiorna la posizione e la riporta entro un giro.
-	int64_t nuova_posizione =
-	  ((int64_t)posizione + ENCODER_SIGN * delta) % ENCODER_CPR;
+	int32_t nuova_posizione = (posizione + ENCODER_SIGN * delta) % ENCODER_CPR;
 
-	// Intervallo conteggi: (-1200, +1200].
+	// Intervallo conteggi da -1199 a +1200.
 	if (nuova_posizione > HALF_CPR)
 	  nuova_posizione -= ENCODER_CPR;
 	else if (nuova_posizione <= -HALF_CPR)
 	  nuova_posizione += ENCODER_CPR;
 
-	posizione = (int32_t)nuova_posizione;
+	posizione = nuova_posizione;
 
 	// Le due uscite richieste.
 	theta_deg = (float)posizione * (360.0f / ENCODER_CPR);
 	theta_rad = (float)posizione * (2.0f * PI_F / ENCODER_CPR);
 }
 
-/* Una lettura per periodo di controllo: Leggi_theta, poi tempo di quiete e
- * controllo dei salti. elapsed_ms = tempo dalla lettura precedente.
- * Ritorna 1 se la variazione e' fisicamente impossibile (salto contato in
- * encoder_salti); decidere cosa fare spetta al chiamante.
- */
+/* Chiamata una volta per ciclo di controllo.
+ * Aggiorna theta, conta da quanto il pendolo e' fermo 
+ * e controlla che il movimento sia fisicamente possibile.
+ * Ritorna 1 se il salto e' troppo grande. */
+
 uint8_t Encoder_Campiona(uint32_t elapsed_ms, uint32_t periodo_ms)
 {
     Leggi_theta();
     int32_t delta_encoder = encoder_ultimo_delta;
     uint32_t salto_max = (CFG_SALTO_ENCODER_MAX * elapsed_ms + periodo_ms - 1U) / periodo_ms;
-    /* Quiete: al piu' un conteggio (fronte che vibra) per lettura. */
+    /* Quiete: al piu' un conteggio per lettura. */
     if (delta_encoder >= -1 && delta_encoder <= 1)
     {
         if (encoder_quiete_ms < 0x7FFFFFFFU)
@@ -85,20 +75,16 @@ uint8_t Encoder_Campiona(uint32_t elapsed_ms, uint32_t periodo_ms)
     }
     else
         encoder_quiete_ms = 0;
+    /* Controllo dei salti */
     if ((uint32_t)(delta_encoder < 0 ? -delta_encoder : delta_encoder) > salto_max)
     {
-        /* Piu' di CFG_SALTO_ENCODER_MAX conteggi in un periodo: disturbo, non moto. */
         ++encoder_salti;
         return 1;
     }
     return 0;
 }
 
-/* Prima dell'homing, a motore fermo: lasciare il pendolo libero verso
- * il basso. L'encoder incrementale verifica la quiete, non la verticalita'.
- * Ogni variazione del contatore fa ripartire l'attesa di un secondo.
- * Il chiamante ferma il motore prima della chiamata.
- */
+/* Prima dell'homing, a motore fermo: lasciare il pendolo libero verso il basso. */
 HAL_StatusTypeDef Inizializza_Theta(void)
 {
     theta_inizializzato = 0;
@@ -110,6 +96,7 @@ HAL_StatusTypeDef Inizializza_Theta(void)
     {
         uint32_t conteggio = __HAL_TIM_GET_COUNTER(&htim2);
         uint32_t now = HAL_GetTick();
+        // Ogni variazione del contatore fa ripartire l'attesa di un secondo.
         if (conteggio != riferimento)
         {
             riferimento = conteggio;
@@ -131,8 +118,7 @@ HAL_StatusTypeDef Inizializza_Theta(void)
     return HAL_TIMEOUT;
 }
 
-/* Imposta l'angolo corrente al valore iniziale dell'addestramento
- * (CFG_ANGOLO_INIZIALE_RAD, -180 gradi = appeso) senza toccare TIM2. */
+/* Imposta l'angolo corrente al valore iniziale dell'addestramento. */
 void Theta_Ricalibra(void)
 {
     int32_t conteggi = (int32_t)lroundf(CFG_ANGOLO_INIZIALE_RAD * (float)ENCODER_CPR / (2.0f * PI_F));

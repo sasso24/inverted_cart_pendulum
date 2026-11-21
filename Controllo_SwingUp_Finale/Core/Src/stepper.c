@@ -1,19 +1,18 @@
-/* Motore passo-passo, finecorsa e homing del carrello (vedi stepper.h). */
+/* Motore stepper, finecorsa e homing del carrello. */
 #include "stepper.h"
 #include "controllo.h"
 #include <math.h>
 
 #define STEP_CHANNEL TIM_CHANNEL_1
 
-/* Homing indipendente dalla configurazione della rete (prima: 2 x 3200 Hz). */
+/* Configurazione Homing. */
 #define HOMING_VELOCITY_HZ  (6400.0f)
 #define HOMING_TIMEOUT_MS  120000U
 
 extern TIM_HandleTypeDef htim3;
 
-// Var stepper
-/* Soglia di partenza in Hz, modificabile prima di ogni movimento. */
-float max_starting_frequency = 1000.0f;
+/* Soglia di partenza in Hz per la rampa. */
+float max_starting_frequency = MIN_FREQUENCY;
 static float stepper_target_frequency = MAX_FREQUENCY;
 static float stepper_counter_clock;
 static float stepper_start_frequency;
@@ -31,7 +30,7 @@ volatile GPIO_PinState direzione_dopo_arresto = DIR_FORWARD;
 volatile float frequenza_applicata_hz = 0.0f;
 
 /* Riferimento del carrello: zero al finecorsa sinistro, positivo a destra.
- * Stima in impulsi STEP comandati, valida solo dopo homing riuscito.
+ * Stima in impulsi STEP comandati.
  */
 volatile int32_t posizione_carrello_steps = 0;
 volatile int32_t posizione_carrello_min_steps = 0;
@@ -42,15 +41,15 @@ volatile uint8_t carrello_inizializzato = 0;
 volatile HAL_StatusTypeDef inizializzazione_esito = HAL_ERROR;
 
 /* Prima dell'abilitazione di B1, l'homing iniziale e' indipendente
- * dal comando del controllo. Dopo, ogni avvio richiede l'abilitazione.
+ * dal comando del controllo. Dopo, ogni avvio del motore richiede l'abilitazione.
  */
 static uint8_t Stepper_MovimentoConsentito(void)
 {
     return !pulsante_inizializzato || controllo_abilitato;
 }
 
-/* Attesa interrompibile: le vecchie sequenze devono uscire prima che
- * il main possa accettare una nuova richiesta di avvio.
+/* Attesa interrompibile: Se il movimento viene vietato (per esempio per una pressione di B1) 
+ * esce subito senza aspettare il resto.
  */
 static uint8_t Stepper_Attendi(uint32_t durata_ms)
 {
@@ -61,15 +60,13 @@ static uint8_t Stepper_Attendi(uint32_t durata_ms)
     return Stepper_MovimentoConsentito();
 }
 
-/* Pull-down esterno: 1 quando il contatto porta PC1 a livello alto,
- * 0 quando l'ingresso e' basso. Lettura istantanea senza antirimbalzo.
- */
+/* Pull-down interno */
 uint8_t FinecorsaSinistro_Premuto(void)
 {
     return HAL_GPIO_ReadPin(FC_sx_GPIO_Port, FC_sx_Pin) == GPIO_PIN_SET;
 }
 
-/* Come il sinistro: pull-down esterno, contatto premuto a livello alto. */
+/* Come il sinistro: pull-down interno, contatto premuto a livello alto. */
 uint8_t FinecorsaDestro_Premuto(void)
 {
     return HAL_GPIO_ReadPin(Fc_dx_GPIO_Port, Fc_dx_Pin) == GPIO_PIN_SET;
@@ -96,9 +93,7 @@ void Stepper_Stop(void)
     stop_al_fronte_step = 0;
 }
 
-/* Check e avvio devono essere indivisibili rispetto all'ISR di stop.
- * Sezione breve, senza attese: HAL_TIM_PWM_Start_IT scrive solo registri.
- * Nel main gli avvii richiedono B1; l'homing iniziale resta autonomo.
+/* Check del movimento e avvio del PWM devono essere indivisibili rispetto all'ISR di stop.
  */
 void Stepper_StartIfEnabled(void)
 {
@@ -124,8 +119,7 @@ static float Stepper_ClampFrequency(float frequency)
     return frequency;
 }
 
-/* ARR e CCR vengono applicati insieme al prossimo periodo PWM.
- * Non generare UG durante il moto: troncherebbe il periodo corrente.
+/* Applicazione di ARR e CCR al prossimo periodo PWM.
  */
 void Stepper_ApplyFrequency(float frequency)
 {
@@ -136,18 +130,17 @@ void Stepper_ApplyFrequency(float frequency)
         period = 2.0f;
     uint32_t ticks = (uint32_t)period;
 
-    /* Protegge anche il read/modify/write di CR1 da uno stop concorrente. */
+    /* Protezione read/write di CR1 da uno stop concorrente di un interrupt. */
     uint32_t primask = __get_PRIMASK();
     __disable_irq();
-    SET_BIT(htim3.Instance->CR1, TIM_CR1_UDIS);
+    SET_BIT(htim3.Instance->CR1, TIM_CR1_UDIS);   // Disabilita l'aggiornamento automatico di ARR e CCR
     __HAL_TIM_SET_AUTORELOAD(&htim3, ticks - 1U);
     __HAL_TIM_SET_COMPARE(&htim3, STEP_CHANNEL, ticks / 2U);
     CLEAR_BIT(htim3.Instance->CR1, TIM_CR1_UDIS);
     __set_PRIMASK(primask);
 }
 
-/* Chiamata a timer fermo per OGNI nuovo movimento, anche dopo uno stop
- * anticipato. La frequenza obiettivo resta separata da quella della rampa.
+/* Chiamata a timer fermo per ogni nuovo movimento.
  */
 static void Stepper_PrepareRamp(void)
 {
@@ -168,8 +161,7 @@ static void Stepper_PrepareRamp(void)
     stepper_ramp_last_ms = stepper_ramp_start_ms;
 }
 
-/* Aggiornamento non bloccante dal callback degli impulsi STEP.
- * La rampa e' lineare nel tempo e termina esattamente all'obiettivo.
+/* Aggiornamento chiamato nella callback degli impulsi STEP.
  */
 static void Stepper_UpdateRamp(void)
 {
@@ -190,8 +182,7 @@ static void Stepper_UpdateRamp(void)
     Stepper_ApplyFrequency(frequency);
 }
 
-/* Per il controllo da SysTick, a timer fermo e interrupt mascherati:
- * movimento continuo senza la rampa di homing, poi Stepper_StartIfEnabled.
+/* Reset del timer prima di far ripartire il motore da fermo
  */
 void Stepper_PreparaAvvioContinuo(void)
 {
@@ -203,18 +194,19 @@ void Stepper_PreparaAvvioContinuo(void)
     __HAL_TIM_CLEAR_FLAG(&htim3, TIM_FLAG_UPDATE | TIM_FLAG_CC1);
 }
 
-/* TIM3 a 16 bit: sotto questa frequenza il periodo non e' rappresentabile. */
+/* Restituisce la frequenza minima che il motore puo' generare. */
 float Stepper_FrequenzaMinimaHz(void)
 {
     return stepper_counter_clock / 65536.0f;
 }
 
-/* Frequenza quantizzata realmente programmata in ARR, senza segno. */
+/* Frequenza programmata in ARR, senza segno. */
 float Stepper_FrequenzaProgrammataHz(void)
 {
     return stepper_counter_clock / (float)(htim3.Instance->ARR + 1U);
 }
 
+/* Muove il motore di un certo numero di passi. */
 void Stepper_MoveSteps(uint32_t steps)
 {
     Stepper_Stop();
@@ -236,6 +228,7 @@ void Stepper_MoveSteps(uint32_t steps)
     Stepper_StartIfEnabled();
 }
 
+/* Muove il motore in una direzione specifica per un certo numero di passi. */
 void Stepper_Move(GPIO_PinState direction, uint32_t steps)
 {
     Stepper_Stop();
@@ -254,9 +247,7 @@ void Stepper_Move(GPIO_PinState direction, uint32_t steps)
     }
 }
 
-/* velocity: impulsi STEP al secondo, limitati a MIN/MAX_FREQUENCY.
- * Valori non positivi/non finiti fermano il motore. Ogni chiamata riparte
- * al massimo da max_starting_frequency e accelera fino a velocity.
+/* Imposta la velocità del motore in termini di impulsi STEP al secondo, limitati a MIN/MAX_FREQUENCY.
  */
 void Stepper_set_velocity(GPIO_PinState direction, float velocity)
 {
@@ -283,9 +274,7 @@ void Stepper_set_velocity(GPIO_PinState direction, float velocity)
 }
 
 /* Da qualsiasi posizione cerca lentamente il finecorsa destro e azzera
- * il conteggio; misura poi la corsa fino a sinistra e torna al centro a 8 kHz.
- * Il riferimento finale resta zero a sinistra, positivo a destra.
- * Chiamare dal main dopo MX_TIM3_Init(), mai da un interrupt.
+ * il conteggio, poi misura la corsa fino a sinistra e torna al centro.
  */
 void Inizializza(void)
 {
@@ -299,14 +288,11 @@ void Inizializza(void)
     posizione_carrello_max_steps = 0;
     posizione_carrello_steps = 0;
 
-    /* Il controllo direzionale consente di partire anche da un finecorsa.
-     * Se siamo gia' a destra, il motore non emette alcun impulso.
-     */
+
     Stepper_set_velocity(DIR_BACKWARD, HOMING_VELOCITY_HZ);
     uint32_t inizio = HAL_GetTick();
     while (stepper_running)
     {
-        /* L'ISR arresta il moto al termine della fase alta dello STEP. */
         if ((uint32_t)(HAL_GetTick() - inizio) >= HOMING_TIMEOUT_MS)
         {
             Stepper_Stop();
@@ -325,16 +311,13 @@ void Inizializza(void)
         return;
     }
 
-    /* Zero della misura della corsa al contatto destro confermato. */
+    // Zero impostato al finecorsa destro.
     step_count = 0;
     posizione_carrello_steps = 0;
     Stepper_set_velocity(DIR_FORWARD, HOMING_VELOCITY_HZ);
     inizio = HAL_GetTick();
     while (stepper_running)
     {
-        /* L'ISR conta l'impulso e controlla il finecorsa al termine
-         * della fase alta: non troncare qui un impulso da contare.
-         */
         if ((uint32_t)(HAL_GetTick() - inizio) >= HOMING_TIMEOUT_MS)
         {
             Stepper_Stop();
@@ -345,7 +328,7 @@ void Inizializza(void)
     }
 
     Stepper_Stop();
-    HAL_Delay(20); /* Conferma del contatto a motore fermo. */
+    HAL_Delay(20); 
     if (!arresto_finecorsa || !FinecorsaSinistro_Premuto()
         || step_count < 2U || step_count > INT32_MAX)
     {
@@ -353,7 +336,7 @@ void Inizializza(void)
         return;
     }
 
-    /* Salvare la misura prima che il prossimo movimento azzeri step_count. */
+    /* La misura viene salvata prima che il prossimo movimento azzeri step_count. */
     corsa_totale_steps = step_count;
     posizione_carrello_min_steps = 0;
     posizione_carrello_max_steps = (int32_t)corsa_totale_steps;
@@ -389,9 +372,8 @@ void Inizializza(void)
     inizializzazione_esito = HAL_OK;
 }
 
-/* Fine di ogni impulso STEP (TIM3 CH1): conteggio della posizione, finecorsa,
- * limiti del controllo, arresto al fronte e rampa di homing. Unica
- * definizione nel progetto: sostituisce quella __weak della HAL.
+/* Alla fine di ogni impulso STEP effettua: conteggio della posizione, controllo dei finecorsa,
+ * limiti del controllo, arresto al fronte e rampa di homing. 
  */
 void HAL_TIM_PWM_PulseFinishedCallback(TIM_HandleTypeDef *htim)
 {

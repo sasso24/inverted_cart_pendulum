@@ -21,9 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-/* Moduli dell'applicazione: encoder.c, stepper.c, rete.c, controllo.c, hil.c.
- * Qui restano l'inizializzazione delle periferiche, la sequenza di avvio e il
- * ciclo principale. */
+
 #include "stepper.h"
 #include "encoder.h"
 #include "rete.h"
@@ -121,12 +119,12 @@ int main(void)
       Error_Handler();
   }
 
+/* Verifica HIL */
 #if HIL_MODE
-  /* Nessun homing e nessun movimento: misure e comandi passano dal PC. */
   Hil_Esegui();
 #endif
 
-  /* Acquisire il riferimento del pendolo PRIMA di muovere il carrello. */
+  /* Acquisizione del riferimento del pendolo prima di muovere il carrello. */
   Stepper_Stop();
   if (Inizializza_Theta() != HAL_OK)
   {
@@ -136,7 +134,7 @@ int main(void)
   ultimo_theta_rad = theta_rad;
   velocita_angolare_rad_s = 0.0f;
 
-  /* Homing automatico come prima, indipendente dal pulsante. */
+  /* Homing automatico del carrello per settare la posizione iniziale. */
   Inizializza();
   if (inizializzazione_esito != HAL_OK)
   {
@@ -144,18 +142,18 @@ int main(void)
   }
   Calcola_LimitiControllo();
 
-  /* Da qui B1 abilita/disabilita solo il controllo nel ciclo principale.
-   * Le pressioni durante l'homing non vengono accodate.
-   */
+  
   Stepper_Stop();
   __HAL_GPIO_EXTI_CLEAR_IT(B1_Pin);
+  /* Pulizia delle pressioni del pulsante B1 durante l'homing. */
   HAL_NVIC_ClearPendingIRQ(EXTI15_10_IRQn);
-  /* Aggiornamento dal riferimento pre-homing, NON una nuova calibrazione. */
+  /* Aggiornamento dal riferimento di theta. */
   Leggi_theta();
   ultimo_theta_rad = theta_rad;
   ultimo_carrello_steps = posizione_carrello_steps;
   ultimo_campione_ms = HAL_GetTick();
   pulsante_inizializzato = 1;
+  /* Da qui B1 è abilitato.*/
   HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
   /* USER CODE END 2 */
@@ -164,11 +162,13 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+      /* Cambio rete. */
       if (!controllo_abilitato)
       {
           Rete_CambiaSeRichiesto();
           Controllo_AccettaAvvio();
       }
+      /* Ciclo principale di controllo. */
       Controllo_Campiona();
       HAL_Delay(1);
     /* USER CODE END WHILE */
@@ -454,7 +454,6 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN MX_GPIO_Init_2 */
   /* Abilitazione rimandata al main, dopo Inizializza(). */
   HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
-  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
 /* USER CODE END MX_GPIO_Init_2 */
 }
 
@@ -471,7 +470,7 @@ void Error_Handler(void)
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
-  /* Fermare l'hardware PRIMA del blocco: il PWM continua senza CPU. */
+  /* Ferma l'hardware prima del ciclo infinito (altrimenti il PWM continuerebbe anche senza CPU). */
   if (htim3.Instance == TIM3)
       Controllo_Disabilita();
   while (1)

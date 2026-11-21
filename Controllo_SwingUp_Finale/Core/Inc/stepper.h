@@ -1,40 +1,30 @@
-/* Motore passo-passo (STEP su TIM3 CH1, DIR su PC0), finecorsa e homing
- * del carrello. Il controllo (controllo.c) comanda il motore da SysTick con
- * Stepper_ApplyFrequency/Stepper_StartIfEnabled; i movimenti bloccanti
- * (Stepper_Move, Inizializza) sono solo per il main, mai da interrupt.
- */
+/* Motore stepper, finecorsa e homing del carrello. */
 #ifndef STEPPER_H
 #define STEPPER_H
 
 #include "main.h"
-#include "config_controllo.h"  /* generato da esporta_firmware.py */
-
+#include "config_controllo.h"  
 #define MIRCOSTEP CFG_MICROSTEP
 #define MIN_FREQUENCY CFG_FREQ_MIN_HZ
 #define MAX_FREQUENCY CFG_FREQ_MAX_HZ
 #define STEPPER_ACCELERATION_HZ_PER_S CFG_RAMPA_HZ_S
 
-// tutte i punti di rif sono da dietro
-#define DIR_FORWARD  GPIO_PIN_SET   //SInistra (da dietro)
+// Tutti i punti di riferimento sono da dietro
+#define DIR_FORWARD  GPIO_PIN_SET   // SInistra (da dietro)
 #define DIR_BACKWARD GPIO_PIN_RESET
 
-/* Soglia di partenza in Hz, modificabile prima di ogni movimento. */
+/* Inizializzazione del motore stepper. */
 extern float max_starting_frequency;
 extern volatile uint32_t step_count;
 extern volatile uint32_t step_target;
 extern volatile uint8_t stepper_running;
 extern volatile GPIO_PinState stepper_direction;
 extern volatile uint8_t arresto_finecorsa;
-/* Arresto al prossimo fronte STEP richiesto dal controllo; l'ISR imposta
- * poi direzione_dopo_arresto. */
 extern volatile uint8_t stop_al_fronte_step;
 extern volatile GPIO_PinState direzione_dopo_arresto;
-/* Frequenza STEP realmente programmata, firmata; zero a motore fermo. */
 extern volatile float frequenza_applicata_hz;
 
-/* Riferimento del carrello: zero al finecorsa sinistro, positivo a destra.
- * Stima in impulsi STEP comandati, valida solo dopo homing riuscito.
- */
+/* Riferimento del carrello. */
 extern volatile int32_t posizione_carrello_steps;
 extern volatile int32_t posizione_carrello_min_steps;
 extern volatile int32_t posizione_carrello_max_steps;
