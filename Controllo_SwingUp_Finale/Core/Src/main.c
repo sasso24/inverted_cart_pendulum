@@ -162,14 +162,14 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-      /* Cambio rete. */
+      /* Inizializzazione del controllo ed eventuale cambio di rete. */
       if (!controllo_abilitato)
       {
           Rete_CambiaSeRichiesto();
           Controllo_AccettaAvvio();
       }
       /* Ciclo principale di controllo. */
-      Controllo_Campiona();
+      Controllo_Esegui();
       HAL_Delay(1);
     /* USER CODE END WHILE */
 

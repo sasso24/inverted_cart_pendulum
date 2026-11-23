@@ -1,5 +1,5 @@
 /* Rete X-CUBE-AI, ingressi dalla stima e storia degli ingressi (rete.c).
- * L'inferenza la esegue il chiamante (Controllo_Campiona in controllo.c, Hil_Elabora)
+ * L'inferenza la esegue il chiamante (Controllo_Esegui in controllo.c, Hil_Elabora)
  * con ai_network_run(rete, rete_input, rete_output).
  */
 #ifndef RETE_H
