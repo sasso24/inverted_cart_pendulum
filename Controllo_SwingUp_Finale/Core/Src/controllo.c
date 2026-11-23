@@ -281,7 +281,7 @@ void Controllo_MotorTick(void)
         /* Motore fermo nel verso opposto: nuovo DIR e attesa del tempo di setup del driver (>= 0.65 us)
          * prima del primo impulso. */
         Stepper_SetDirection(dir);
-        for (volatile uint32_t k = 0; k < DIR_SETUP_CICLI; k++)
+        for (volatile uint32_t k = 0; k < DIR_SETUP_CICLI; ++k)
         {
         }
     }
@@ -358,7 +358,7 @@ void Controllo_Esegui(void)
     ultimo_theta_rad = theta_rad;
     ultimo_carrello_steps = cart_steps;
 
-    /* Correzione dello stimatore; SysTick non deve predire a meta' aggiornamento. */
+    /* Correzione dello stimatore. */
     Stima st;
     primask = __get_PRIMASK();
     __disable_irq();
@@ -371,7 +371,7 @@ void Controllo_Esegui(void)
     }
     else
         Stima_Correggi(&stima, x_misurata, theta_rad);
-    /* A controllo fermo il conteggio STEP e' esatto: niente deriva della stima. */
+
     if (!controllo_abilitato)
         stima.x = x_misurata;
     st = stima;
@@ -382,7 +382,8 @@ void Controllo_Esegui(void)
     Rete_Osservazione(&st, applied_hz, rete_osservazione);
     if (!controllo_abilitato || !rete_pronta)
         return;
-    ai_float *input = (ai_float *)rete_input[0].data;
+    /* Definizione del puntatore agli ingressi della rete (ai_float alias di float) */
+    ai_float *input = (ai_float *)rete_input[0].data; 
     for (uint32_t i = 0; i < 6U; ++i)
     {
         if (!isfinite(rete_osservazione[i]))
@@ -401,6 +402,8 @@ void Controllo_Esegui(void)
     Storia_Ingressi(input);
 #endif
     uint32_t start = HAL_GetTick();
+    /* Avvio della rete e restituzione codice di uscita (1 -> inferenza completata con successo
+        altro -> errore) */
     ai_i32 batches = ai_network_run(rete, rete_input, rete_output);
     rete_durata_ms = (uint32_t)(HAL_GetTick() - start);
     if (batches != 1)
@@ -410,20 +413,24 @@ void Controllo_Esegui(void)
         Controllo_Fault(2);
         return;
     }
+    /* Output della rete */
     float action = ((ai_float *)rete_output[0].data)[0];
     if (!isfinite(action))
     {
         Controllo_Fault(3);
         return;
     }
-    action = fmaxf(-1.0f, fminf(action, 1.0f));
+    action = fmaxf(-1.0f, fminf(action, 1.0f)); // Azione limitata a [-1;1]
+
 #if CFG_STORIA_N > 0
     Storia_Aggiungi(rete_osservazione, action);
 #endif
+
+    /* Conversione azione in Hz */
     float requested = Rete_AzioneInHz(action);
     primask = __get_PRIMASK();
     __disable_irq();
-    /* Uno stop durante ai_network_run non puo' essere annullato dal risultato. */
+    /* Aggiornamento dei valori della rete solo se il controllo è abilitato */
     if (controllo_abilitato)
     {
         if ((uint32_t)(HAL_GetTick() - now) >= CONTROL_PERIOD_MS)
