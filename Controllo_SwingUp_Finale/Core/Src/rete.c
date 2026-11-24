@@ -1,19 +1,18 @@
-/* Rete X-CUBE-AI: inizializzazione, cambio rete, ingressi dalla stima,
- * storia degli ingressi e conversione dell'uscita (vedi rete.h). */
+/* Rete X-CUBE-AI, ingressi dalla stima e storia degli ingressi.
+ * L'inferenza la esegue il chiamante con ai_network_run.*/
 #include "rete.h"
 #include "controllo.h"
 #include <math.h>
 #include "network_data.h"
-#include "reti_candidate.h"    /* generato da esporta_firmware.py (pesi delle reti) */
+#include "reti_candidate.h"    
 #include "stepper.h"
 
 #define POSIZIONE_SCALA_M        CFG_POSIZIONE_SCALA_M
 #define VELOCITA_SCALA_M_S       CFG_VELOCITA_SCALA_M_S
 #define OMEGA_SCALA_RAD_S        CFG_OMEGA_SCALA_RAD_S
 
-/* Ingressi: i sei attuali + 7 per ogni ritardo della storia (config_controllo.h). */
 #if AI_NETWORK_IN_1_SIZE != CFG_STORIA_INGRESSI || AI_NETWORK_OUT_1_SIZE != 1
-#error "La rete X-CUBE-AI non ha CFG_STORIA_INGRESSI ingressi e una uscita: rieseguire esporta_firmware.py"
+#error "La rete X-CUBE-AI non ha CFG_STORIA_INGRESSI ingressi e una uscita"
 #endif
 
 volatile uint8_t rete_pronta = 0;
@@ -22,22 +21,18 @@ volatile float rete_azione = 0.0f;
 volatile uint32_t rete_inferenze = 0;
 volatile uint32_t rete_durata_ms = 0;
 ai_handle rete = AI_HANDLE_NULL;
-/* Piu' reti nello stesso firmware (reti_candidate.c), stessa configurazione.
- * Per cambiarla: a controllo fermo scrivere rete_scelta in Live Expressions;
- * il cambio avviene subito nel ciclo principale e rete_attiva lo conferma.
- * reti_candidate_nomi[rete_attiva] dice quale rete e'. */
+/* Rete attiva fra quelle di reti_candidate.c: scrivere rete_scelta dal
+* debugger a controllo fermo, rete_attiva conferma il cambio. */
 volatile uint32_t rete_scelta = 0;
-volatile uint32_t rete_attiva = 0;
+volatile uint32_t rete_attiva = 0;  
 AI_ALIGNED(4) static ai_u8 rete_activations[AI_NETWORK_DATA_ACTIVATIONS_SIZE];
 ai_buffer *rete_input;
 ai_buffer *rete_output;
 volatile ai_error rete_ultimo_errore;
 
 #if CFG_STORIA_N > 0
-/* Storia degli ingressi (ConStoria in ambiente.py): per ogni ritardo k la rete riceve i sei
- * ingressi di k periodi fa e l'azione decisa allora. Anello di CFG_STORIA_MAX
- * periodi: storia_testa = periodo precedente (ritardo 1). Ad ogni avvio la storia
- * e' riempita con i primi ingressi e azione 0, come all'inizio di un episodio. */
+/* Storia degli ingressi: per ogni ritardo k la rete riceve i sei
+ * ingressi di k periodi fa e l'azione decisa allora. */
 static const uint32_t storia_ritardi[CFG_STORIA_N] = CFG_STORIA_RITARDI;
 static float storia_passato[CFG_STORIA_MAX][7];
 static uint32_t storia_testa = 0;
@@ -67,7 +62,7 @@ uint8_t Rete_Init(void)
 }
 
 /* Solo dal main e a controllo fermo: distrugge la rete attuale e la ricrea
- * con i pesi di rete_scelta (stessa struttura X-CUBE-AI, cambia solo l'array). */
+ * con i pesi di rete_scelta. */
 void Rete_CambiaSeRichiesto(void)
 {
     uint32_t scelta = rete_scelta;
@@ -81,7 +76,7 @@ void Rete_CambiaSeRichiesto(void)
         controllo_errore = 1;
 }
 
-/* I sei ingressi della rete dalla stima: stesse scale dell'addestramento. */
+/* I sei ingressi della rete dalla stima. */
 void Rete_Osservazione(const Stima *st, float applied_hz, volatile float obs[6])
 {
     obs[0] = st->x / POSIZIONE_SCALA_M;
@@ -89,9 +84,10 @@ void Rete_Osservazione(const Stima *st, float applied_hz, volatile float obs[6])
     obs[2] = cosf(st->theta);
     obs[3] = st->velocita / VELOCITA_SCALA_M_S;
     obs[4] = st->omega / OMEGA_SCALA_RAD_S;
-    obs[5] = applied_hz / MAX_FREQUENCY;
+    obs[5] = applied_hz / MAX_FREQUENCY;            // Frequenza realmente applicata
 }
 
+/* Duplica lo stato attuale azzerando le uscite (come se fosse rimasto fermo per la durata della storia).  */
 #if CFG_STORIA_N > 0
 void Storia_Reset(const volatile float obs[6])
 {
@@ -99,12 +95,12 @@ void Storia_Reset(const volatile float obs[6])
     {
         for (uint32_t i = 0; i < 6U; ++i)
             storia_passato[k][i] = obs[i];
-        storia_passato[k][6] = 0.0f;
+        storia_passato[k][6] = 0.0f;                // Uscita della rete
     }
     storia_testa = 0;
 }
 
-/* Dopo ogni inferenza: gli ingressi e l'azione di adesso diventano il ritardo 1. */
+/* Eseguito dopo ogni inferenza. Gli ingressi e l'azione di adesso diventano il ritardo 1. */
 void Storia_Aggiungi(const volatile float obs[6], float azione)
 {
     storia_testa = (storia_testa + CFG_STORIA_MAX - 1U) % CFG_STORIA_MAX;
@@ -113,7 +109,7 @@ void Storia_Aggiungi(const volatile float obs[6], float azione)
     storia_passato[storia_testa][6] = azione;
 }
 
-/* Ingressi 6.. della rete: [obs(t-k), u(t-k)] per ogni ritardo k, nell'ordine di ConStoria (ambiente.py). */
+/* Eseguito prima di ogni inferenza. Costruisce il buffer dei 132 ingressi attuali della rete. */
 void Storia_Ingressi(ai_float *input)
 {
     for (uint32_t j = 0; j < CFG_STORIA_N; ++j)
@@ -125,8 +121,7 @@ void Storia_Ingressi(ai_float *input)
 }
 #endif
 
-/* Uscita della rete [-1,1] -> frequenza STEP firmata, come ControlloStepper (ambiente.py)
- * (ControlloStepper.azione_a_hz), zona morta compresa. */
+/* Conversione dell'uscita della rete [-1,1] in frequenza STEP con segno. */
 float Rete_AzioneInHz(float action)
 {
     float modulo = fabsf(action);
