@@ -78,7 +78,7 @@ uint8_t Encoder_Campiona(uint32_t elapsed_ms, uint32_t periodo_ms)
     /* Controllo dei salti */
     if ((uint32_t)(delta_encoder < 0 ? -delta_encoder : delta_encoder) > salto_max)
     {
-        ++encoder_salti;
+        encoder_salti++;
         return 1;
     }
     return 0;
@@ -131,5 +131,5 @@ void Theta_Ricalibra(void)
     posizione = conteggi;
     theta_deg = (float)posizione * (360.0f / ENCODER_CPR);
     theta_rad = (float)posizione * (2.0f * PI_F / ENCODER_CPR);
-    ++theta_ricalibrazioni;
+    theta_ricalibrazioni++;
 }

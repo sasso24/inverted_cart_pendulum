@@ -91,9 +91,9 @@ void Rete_Osservazione(const Stima *st, float applied_hz, volatile float obs[6])
 #if CFG_STORIA_N > 0
 void Storia_Reset(const volatile float obs[6])
 {
-    for (uint32_t k = 0; k < CFG_STORIA_MAX; ++k)
+    for (uint32_t k = 0; k < CFG_STORIA_MAX; k++)
     {
-        for (uint32_t i = 0; i < 6U; ++i)
+        for (uint32_t i = 0; i < 6U; i++)
             storia_passato[k][i] = obs[i];
         storia_passato[k][6] = 0.0f;                // Uscita della rete
     }
@@ -104,7 +104,7 @@ void Storia_Reset(const volatile float obs[6])
 void Storia_Aggiungi(const volatile float obs[6], float azione)
 {
     storia_testa = (storia_testa + CFG_STORIA_MAX - 1U) % CFG_STORIA_MAX;
-    for (uint32_t i = 0; i < 6U; ++i)
+    for (uint32_t i = 0; i < 6U; i++)
         storia_passato[storia_testa][i] = obs[i];
     storia_passato[storia_testa][6] = azione;
 }
@@ -112,10 +112,10 @@ void Storia_Aggiungi(const volatile float obs[6], float azione)
 /* Eseguito prima di ogni inferenza. Costruisce il buffer dei 132 ingressi attuali della rete. */
 void Storia_Ingressi(ai_float *input)
 {
-    for (uint32_t j = 0; j < CFG_STORIA_N; ++j)
+    for (uint32_t j = 0; j < CFG_STORIA_N; j++)
     {
         const float *campione = storia_passato[(storia_testa + storia_ritardi[j] - 1U) % CFG_STORIA_MAX];
-        for (uint32_t i = 0; i < 7U; ++i)
+        for (uint32_t i = 0; i < 7U; i++)
             input[6U + 7U * j + i] = campione[i];
     }
 }

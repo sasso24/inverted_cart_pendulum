@@ -92,7 +92,7 @@ void Controllo_ButtonTick(void)
     if (HAL_GPIO_ReadPin(B1_GPIO_Port, B1_Pin) == GPIO_PIN_RESET)
         pulsante_rilascio_ms = 0;
     else if (pulsante_rilascio_ms < BUTTON_RELEASE_MS)
-        ++pulsante_rilascio_ms;
+        pulsante_rilascio_ms++;
     else
         pulsante_pronto = 1;
     __set_PRIMASK(primask);
@@ -281,7 +281,7 @@ void Controllo_MotorTick(void)
         /* Motore fermo nel verso opposto: nuovo DIR e attesa del tempo di setup del driver (>= 0.65 us)
          * prima del primo impulso. */
         Stepper_SetDirection(dir);
-        for (volatile uint32_t k = 0; k < DIR_SETUP_CICLI; ++k)
+        for (volatile uint32_t k = 0; k < DIR_SETUP_CICLI; k++)
         {
         }
     }
@@ -384,7 +384,7 @@ void Controllo_Esegui(void)
         return;
     /* Definizione del puntatore agli ingressi della rete (ai_float alias di float) */
     ai_float *input = (ai_float *)rete_input[0].data; 
-    for (uint32_t i = 0; i < 6U; ++i)
+    for (uint32_t i = 0; i < 6U; i++)
     {
         if (!isfinite(rete_osservazione[i]))
         {
@@ -440,7 +440,7 @@ void Controllo_Esegui(void)
             rete_azione = action;
             frequenza_richiesta_hz = requested;
             ultimo_comando_ms = HAL_GetTick();
-            ++rete_inferenze;
+            rete_inferenze++;
         }
     }
     __set_PRIMASK(primask);

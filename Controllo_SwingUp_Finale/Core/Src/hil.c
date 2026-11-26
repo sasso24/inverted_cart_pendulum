@@ -56,7 +56,7 @@ volatile uint32_t hil_scartati = 0;
 static uint8_t Hil_Checksum(const uint8_t *dati, uint32_t n)
 {
     uint8_t somma = 0;
-    for (uint32_t i = 0; i < n; ++i)
+    for (uint32_t i = 0; i < n; i++)
         somma = (uint8_t)(somma + dati[i]);
     return (uint8_t)(0U - somma);
 }
@@ -112,7 +112,7 @@ static void Hil_Elabora(const HilRichiesta *r, HilRisposta *out)
         return;
     uint8_t valida = (r->comando <= 1U) && r->n <= HIL_MAX_PREDIZIONI
         && isfinite(r->x) && isfinite(r->theta) && isfinite(r->applied_hz);
-    for (uint32_t i = 0; valida && i < r->n; ++i)
+    for (uint32_t i = 0; valida && i < r->n; i++)
         valida = isfinite(r->v[i]);
     /* Assegnazione codice di errore */
     if (!valida || !rete_pronta)
@@ -126,13 +126,13 @@ static void Hil_Elabora(const HilRichiesta *r, HilRisposta *out)
         Stima_Reset(&hil_stima, r->x, r->theta, 0.0f);
     else
     {
-        for (uint32_t i = 0; i < r->n; ++i)
+        for (uint32_t i = 0; i < r->n; i++)
             Stima_Predici(&hil_stima, r->v[i], MOTOR_PERIOD_MS * 0.001f);
         Stima_Correggi(&hil_stima, r->x, r->theta);
     }
     Rete_Osservazione(&hil_stima, r->applied_hz, rete_osservazione);
     ai_float *input = (ai_float *)rete_input[0].data;
-    for (uint32_t i = 0; i < 6U; ++i)
+    for (uint32_t i = 0; i < 6U; i++)
     {
         out->osservazione[i] = rete_osservazione[i];
         input[i] = rete_osservazione[i];
@@ -170,7 +170,7 @@ static void Hil_Elabora(const HilRichiesta *r, HilRisposta *out)
     out->richiesta_hz = Rete_AzioneInHz(action);
     rete_azione = action;
     frequenza_richiesta_hz = out->richiesta_hz;
-    ++rete_inferenze;
+    rete_inferenze++;
 }
 
 
@@ -186,7 +186,7 @@ void Hil_Esegui(void)
     {
         if (!Hil_Ricevi(&richiesta))
         {
-            ++hil_scartati;
+            hil_scartati++;
             continue;
         }
         /* 
@@ -196,7 +196,7 @@ void Hil_Esegui(void)
             Hil_Elabora(&richiesta, &hil_risposta);
         prima = 0;
         Hil_Invia(&hil_risposta);
-        ++hil_pacchetti;
+        hil_pacchetti++;
         HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
     }
 }
