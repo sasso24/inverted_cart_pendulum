@@ -32,8 +32,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-/* Guasto della CPU: ferma subito il generatore STEP (TIM3), che senza CPU
- * continuerebbe a muovere il carrello (revisione 9/10, firmware punto 3). */
+/* Guasto della CPU: ferma subito il generatore STEP (TIM3), che continuerebbe a muovere il carrello. */
 #define FERMA_STEP() do { TIM3->CCER &= ~TIM_CCER_CC1E; TIM3->CR1 &= ~TIM_CR1_CEN; } while (0)
 
 /* USER CODE END PD */
